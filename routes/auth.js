@@ -168,33 +168,41 @@ router.post('/login', async (req, res) => {
       return res.status(400).json({ message: 'Email and password are required' });
     }
 
+    const normalizedEmail = email.toLowerCase().trim();
     const UserModel = getUserModel();
-    console.log('🔑 Login attempt for:', email.toLowerCase().trim());
+    console.log('🔑 Login attempt for:', normalizedEmail);
     console.log('💾 Using database:', isDbConnected() ? 'MongoDB' : 'In-Memory');
     
-    // Search by lowercase email (consistent with registration)
-    const user = await UserModel.findOne({ email: email.toLowerCase().trim() });
+    const user = await UserModel.findOne({ email: normalizedEmail });
     
     if (!user) {
-      console.log('❌ User not found');
-      return res.status(401).json({ message: 'Invalid credentials' });
+      console.log('❌ User not found in database');
+      console.log('📋 Available users in memory DB:', memoryDb?.users?.length || 0);
+      if (!isDbConnected() && memoryDb?.users) {
+        console.log('📋 Memory users:', memoryDb.users.map(u => ({ email: u.email, id: u._id })));
+      }
+      return res.status(401).json({ message: 'Invalid credentials - user not found' });
     }
     
-    console.log('✅ User found:', user.email);
+    console.log('✅ User found:', user.email, '| ID:', user._id, '| Role:', user.role);
 
     // Check if comparePassword method exists
     if (typeof user.comparePassword !== 'function') {
       console.error('❌ comparePassword method not found on user object');
+      console.error('User object keys:', Object.keys(user));
       return res.status(500).json({ message: 'Authentication error' });
     }
 
+    console.log('🔐 Comparing password...');
     const isPasswordValid = await user.comparePassword(password);
     console.log('🔐 Password valid:', isPasswordValid);
     
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+      console.log('❌ Password mismatch for user:', user.email);
+      return res.status(401).json({ message: 'Invalid credentials - wrong password' });
     }
 
+    console.log('✅ Login successful for:', user.email);
     const token = jwt.sign(
       { userId: user._id, email: user.email, role: user.role },
       process.env.JWT_SECRET || 'your-secret-key',
@@ -217,6 +225,8 @@ router.post('/login', async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('❌ Login error:', error.message);
+    console.error('Full error:', error);
     res.status(500).json({ message: 'Login failed', error: error.message });
   }
 });

@@ -108,12 +108,27 @@ router.get('/today', authenticateToken, authorizeRole(['faculty', 'admin']), asy
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const lectures = await Lecture.find({
+    // Generate instances from templates if using MongoDB
+    if (isDbConnected()) {
+      await generateLecturesForDate(req.user.userId, today);
+    }
+
+    let lectures = await Lecture.find({
       facultyId: req.user.userId,
-      date: { $gte: today, $lt: tomorrow }
+      date: { $gte: today, $lt: tomorrow },
+      isRecurring: false // Exclude templates - only actual lecture instances
     })
       .sort({ startTime: 1 })
       .lean();
+
+    // Deduplicate by title + subject + startTime (each subject appears once per time slot)
+    const seen = new Set();
+    lectures = lectures.filter((l) => {
+      const key = `${l.title}|${l.subject || ''}|${l.startTime}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 
     res.json({ lectures, date: today.toISOString().split('T')[0] });
   } catch (error) {

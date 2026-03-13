@@ -26,6 +26,10 @@ const UserSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  faceDescriptor: {
+    type: [Number],
+    default: null
+  },
   phone: {
     type: String
   },

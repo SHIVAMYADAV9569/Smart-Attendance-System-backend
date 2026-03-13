@@ -583,7 +583,104 @@ router.get('/students-status/today', authenticateToken, authorizeRole(['faculty'
       }
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching students status', error: error.message });
+   res.status(500).json({ message: 'Error fetching students status', error: error.message });
+  }
+});
+
+// Manually mark/update student attendance (for faculty/admin)
+router.post('/mark-attendance', authenticateToken, authorizeRole(['faculty', 'admin']), async (req, res) => {
+  try {
+   const { studentId, status, lectureId } = req.body;
+
+   if (!studentId || !status) {
+     return res.status(400).json({ message: 'Student ID and status are required' });
+    }
+
+   if (!['present', 'late', 'absent'].includes(status)) {
+     return res.status(400).json({ message: 'Invalid status. Must be present, late, or absent' });
+    }
+
+   const AttendanceModel = getAttendanceModel();
+   const UserModel = getUserModel();
+
+    // Verify student exists
+   const student = await UserModel.findById(studentId);
+   if (!student) {
+     return res.status(404).json({ message: 'Student not found' });
+    }
+
+   const today = new Date();
+    today.setHours(0, 0, 0, 0);
+   const tomorrow = new Date(today);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+
+    // Check if attendance already exists for today
+   let existingRecord;
+   if (isDbConnected()) {
+      existingRecord = await AttendanceModel.findOne({
+        userId: studentId,
+        date: { $gte: today, $lt: tomorrow }
+      });
+    } else {
+     const allRecords = await AttendanceModel.find({ userId: studentId });
+      existingRecord = allRecords.find(r => {
+       const recordDate = new Date(r.date);
+       recordDate.setHours(0, 0, 0, 0);
+       return recordDate.getTime() === today.getTime();
+      });
+    }
+
+   if (existingRecord) {
+      // Update existing record
+      existingRecord.status = status;
+      
+      // If marking as present or late, set check-in time if not already set
+     if ((status === 'present' || status === 'late') && !existingRecord.checkInTime) {
+        existingRecord.checkInTime = new Date().toISOString();
+      }
+      
+      // If marking as absent, clear check-in time
+     if (status === 'absent') {
+        existingRecord.checkInTime = null;
+        existingRecord.checkOutTime = null;
+      }
+
+      await existingRecord.save();
+
+     res.json({
+       message: 'Attendance updated successfully',
+       record: existingRecord
+      });
+    } else {
+      // Create new attendance record
+     const attendanceData = {
+        userId: studentId,
+        date: today,
+        status: status,
+        markedBy: req.user.userId // Faculty who marked it
+      };
+
+      // If marking as present or late, set check-in time
+     if (status === 'present' || status === 'late') {
+        attendanceData.checkInTime = new Date().toISOString();
+      }
+
+      // Add lecture reference if provided
+     if (lectureId) {
+        attendanceData.lectureId = lectureId;
+      }
+
+     const newRecord = new AttendanceModel(attendanceData);
+      await newRecord.save();
+
+     res.json({
+       message: 'Attendance marked successfully',
+       record: newRecord
+      });
+    }
+  } catch (error) {
+   console.error('Error marking attendance:', error);
+   res.status(500).json({ message: 'Error marking attendance', error: error.message });
   }
 });
 

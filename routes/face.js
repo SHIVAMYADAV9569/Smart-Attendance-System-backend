@@ -3,7 +3,7 @@ import User from '../models/User.js';
 import Attendance from '../models/Attendance.js';
 import { authenticateToken, getClientIp } from '../middleware/auth.js';
 import { UserMock, AttendanceMock, memoryDb } from '../config/memoryDb.js';
-import { matchFaces } from '../utils/faceMatching.js';
+import { matchDescriptors } from '../utils/faceDescriptor.js';
 import mongoose from 'mongoose';
 
 const router = express.Router();
@@ -14,36 +14,44 @@ const isDbConnected = () => mongoose.connection.readyState === 1;
 const getUserModel = () => (isDbConnected() ? User : UserMock);
 const getAttendanceModel = () => (isDbConnected() ? Attendance : AttendanceMock);
 
-// Register face
+// Register face - stores faceDescriptor (128-dim) and faceImage (for display)
 router.post('/register-face', authenticateToken, async (req, res) => {
   try {
-    const { faceImage } = req.body;
-    if (!faceImage) return res.status(400).json({ message: 'Face image is required' });
+    const { faceImage, faceDescriptor } = req.body;
+    if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+      return res.status(400).json({ message: 'Valid face descriptor (128 values) is required. Please re-register using the face recognition feature.' });
+    }
 
     const UserModel = getUserModel();
     let user = await UserModel.findById(req.user.userId);
     if (!user && !isDbConnected()) user = memoryDb.users.find(u => u._id === req.user.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
 
+    const update = { faceDescriptor };
+    if (faceImage) update.faceData = faceImage;
+
     if (isDbConnected()) {
-      user = await UserModel.findByIdAndUpdate(req.user.userId, { faceData: faceImage }, { new: true });
+      user = await UserModel.findByIdAndUpdate(req.user.userId, update, { new: true });
     } else {
-      user.faceData = faceImage;
-      await UserModel.updateOne({ _id: req.user.userId }, { $set: { faceData: faceImage } });
+      user.faceData = update.faceData ?? user.faceData;
+      user.faceDescriptor = update.faceDescriptor;
+      await UserModel.updateOne({ _id: req.user.userId }, { $set: update });
     }
 
-    res.json({ message: 'Face data registered successfully', user: { id: user._id, name: user.name } });
+    res.json({ message: 'Face registered successfully', user: { id: user._id, name: user.name } });
   } catch (error) {
     console.error('❌ Face registration error:', error);
     res.status(500).json({ message: 'Error registering face', error: String(error) });
   }
 });
 
-// Recognize and mark attendance
+// Recognize and mark attendance - compares face descriptors using Euclidean distance (threshold 0.6)
 router.post('/recognize', authenticateToken, async (req, res) => {
   try {
-    const { faceImage } = req.body;
-    if (!faceImage) return res.status(400).json({ message: 'Face image is required' });
+    const { faceDescriptor } = req.body;
+    if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+      return res.status(400).json({ message: 'Valid face descriptor is required. Ensure your face is clearly visible in the camera.' });
+    }
 
     const UserModel = getUserModel();
     const AttendanceModel = getAttendanceModel();
@@ -51,13 +59,31 @@ router.post('/recognize', authenticateToken, async (req, res) => {
     let user = await UserModel.findById(req.user.userId);
     if (!user && !isDbConnected()) user = memoryDb.users.find(u => u._id === req.user.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!user.faceData) return res.status(400).json({ message: 'User face not registered' });
+    if (!user.faceDescriptor) {
+      return res.status(400).json({
+        message: 'Face not registered with recognition. Please re-register your face at Register Face page.'
+      });
+    }
 
-    const matchResult = matchFaces(user.faceData, faceImage);
-    if (!matchResult.matched) return res.status(401).json({ message: matchResult.message, confidence: matchResult.confidence, threshold: matchResult.threshold });
+    const matchResult = matchDescriptors(user.faceDescriptor, faceDescriptor);
+
+    console.log('🔍 Face Recognition:', {
+      userId: req.user.userId,
+      distance: matchResult.distance.toFixed(4),
+      threshold: matchResult.threshold,
+      matched: matchResult.matched
+    });
+
+    if (!matchResult.matched) {
+      return res.status(400).json({
+        message: '❌ Face not matched. Attendance not marked.',
+        distance: matchResult.distance,
+        threshold: matchResult.threshold,
+        details: 'Your face does not match the registered photo. Please ensure good lighting and face the camera directly.'
+      });
+    }
 
     const confidence = matchResult.confidence;
-    if (confidence < 0.35) return res.status(401).json({ message: 'Face not matched. Low confidence', confidence });
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -130,17 +156,25 @@ router.get('/today', authenticateToken, async (req, res) => {
 // Debug: test-match
 router.post('/debug/test-match', authenticateToken, async (req, res) => {
   try {
-    const { faceImage } = req.body;
-    if (!faceImage) return res.status(400).json({ message: 'Face image is required' });
+    const { faceDescriptor } = req.body;
+    if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+      return res.status(400).json({ message: 'Face descriptor (128 values) is required' });
+    }
 
     const UserModel = getUserModel();
     let user = await UserModel.findById(req.user.userId);
     if (!user && !isDbConnected()) user = memoryDb.users.find(u => u._id === req.user.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
-    if (!user.faceData) return res.status(400).json({ message: 'User face not registered' });
+    if (!user.faceDescriptor) return res.status(400).json({ message: 'User face not registered with descriptor' });
 
-    const matchResult = matchFaces(user.faceData, faceImage);
-    res.json({ matched: matchResult.matched, confidence: matchResult.confidence, confidencePercentage: (matchResult.confidence * 100).toFixed(2), threshold: (matchResult.threshold * 100).toFixed(0), matchMessage: matchResult.message, user: { name: user.name, email: user.email, hasFaceData: !!user.faceData } });
+    const matchResult = matchDescriptors(user.faceDescriptor, faceDescriptor);
+    res.json({
+      matched: matchResult.matched,
+      distance: matchResult.distance,
+      threshold: matchResult.threshold,
+      matchMessage: matchResult.matched ? 'Face matched' : 'Face not matched',
+      user: { name: user.name, email: user.email }
+    });
   } catch (error) {
     res.status(500).json({ message: 'Error during debug test', error: String(error) });
   }

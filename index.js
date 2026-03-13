@@ -1,7 +1,12 @@
 import express from 'express';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import cors from 'cors';
 import connectDb from './config/db.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 import authRoutes from './routes/auth.js';
 import faceRoutes from './routes/face.js';
 import attendanceRoutes from './routes/attendance.js';
@@ -15,11 +20,9 @@ const app = express();
 
 // Middleware
 app.use(cors());
+app.use('/models', express.static(path.join(__dirname, '..', 'models')));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
-// Connect to database first
-connectDb();
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -41,6 +44,14 @@ app.use((err, req, res, next) => {
   res.status(500).json({ message: 'Something went wrong!', error: err.message });
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Server started on port ${port}`);
+// Connect to database first, then start server (ensures MongoDB is ready before handling login/register)
+const startServer = async () => {
+  await connectDb();
+  app.listen(port, () => {
+    console.log(`🚀 Server started on port ${port}`);
+  });
+};
+startServer().catch((err) => {
+  console.error('❌ Failed to start server:', err.message);
+  process.exit(1);
 });

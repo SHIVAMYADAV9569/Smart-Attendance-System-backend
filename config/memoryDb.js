@@ -25,6 +25,7 @@ export class UserMock {
     this.department = data.department;
     this.course = data.course;
     this.faceData = data.faceData || null;
+    this.faceDescriptor = data.faceDescriptor || null;
     this.isActive = data.isActive !== undefined ? data.isActive : true;
     this.createdAt = data.createdAt ? new Date(data.createdAt) : new Date();
     this._isReconstructing = isReconstructing;
@@ -202,6 +203,7 @@ const loadFromFile = () => {
           enrollmentNumber: userData.enrollmentNumber,
           department: userData.department,
           faceData: userData.faceData,
+          faceDescriptor: userData.faceDescriptor,
           isActive: userData.isActive,
           createdAt: userData.createdAt
         }, true); // true = isReconstructing
