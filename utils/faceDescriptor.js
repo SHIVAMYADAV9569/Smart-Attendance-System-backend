@@ -1,6 +1,6 @@
 /**
  * Face descriptor comparison using Euclidean distance
- * Threshold: distance < 0.9 = Face Matched (very lenient - matches even slight similarity)
+ * Threshold: distance < 0.4 = Face Matched (strict - requires high similarity)
  */
 
 function euclideanDistance(desc1, desc2) {
@@ -20,13 +20,20 @@ function euclideanDistance(desc1, desc2) {
 }
 
 /**
- * Compare face descriptors - distance < 0.9 = match (very lenient)
- * Even slight face match will mark attendance; only clearly different faces rejected
+ * Compare face descriptors - distance < 0.4 = match (strict)
+ * Only highly similar faces will be accepted; prevents false matches between different students
  */
 function matchDescriptors(registeredDescriptor, liveDescriptor) {
   const distance = euclideanDistance(registeredDescriptor, liveDescriptor);
-  const threshold = 0.9;
+  const threshold = 0.4;
   const matched = distance < threshold;
+
+  console.log('🔍 Face Matching Details:', {
+    distance: distance.toFixed(4),
+    threshold,
+    matched,
+    verdict: matched ? '✅ FACE MATCHED' : '❌ FACE NOT MATCHED - Too different'
+  });
 
   return {
     matched,

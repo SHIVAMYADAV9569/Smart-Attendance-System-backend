@@ -8,6 +8,15 @@ import mongoose from 'mongoose';
 
 const router = express.Router();
 
+// Helper function to get IST time (manual timezone conversion)
+const getISTTime = () => {
+  const now = new Date();
+  // IST is UTC+5:30
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  const istTime = new Date(now.getTime() + istOffset + (now.getTimezoneOffset() * 60 * 1000));
+  return istTime;
+};
+
 // Check if MongoDB is connected
 const isDbConnected = () => mongoose.connection.readyState === 1;
 
@@ -85,9 +94,10 @@ router.post('/recognize', authenticateToken, async (req, res) => {
 
     const confidence = matchResult.confidence;
 
-    const today = new Date();
+    // Use IST time for attendance calculations
+    const now = getISTTime();
+    const today = new Date(now);
     today.setHours(0, 0, 0, 0);
-    const now = new Date();
     const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
 
     // Check if this user already marked attendance today
@@ -100,26 +110,33 @@ router.post('/recognize', authenticateToken, async (req, res) => {
       return res.status(200).json({ message: 'Already checked in today', time: timeString, date: today.toISOString().split('T')[0] });
     }
 
-    // Timing rules for attendance (applies to students & faculty):
+    // Timing rules for attendance using IST time and minutes for accuracy:
     // - 09:00 - 09:10 => present
     // - >09:10 and before 14:00 => late
     // - >=14:00 => do not allow marking (show already late)
     let status = 'present';
-    const presentStart = new Date(now);
-    presentStart.setHours(9, 0, 0, 0);
-    const presentEnd = new Date(now);
-    presentEnd.setHours(9, 10, 59, 999);
-    const cutoff = new Date(now);
-    cutoff.setHours(14, 0, 0, 0);
+    
+    // Convert current time to minutes for accurate comparison
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const presentEnd = 9 * 60 + 10; // 9:10 AM = 550 minutes
+    const lateEnd = 14 * 60; // 2:00 PM = 840 minutes
+    
+    console.log('⏰ Attendance Time Calculation (IST):', {
+      currentTime: timeString,
+      currentMinutes,
+      presentEnd,
+      lateEnd,
+      timezone: 'Asia/Kolkata'
+    });
 
-    if (now >= cutoff) {
+    if (currentMinutes >= lateEnd) {
       // After 14:00 do not allow marking via face recognition
       return res.status(403).json({ message: 'Attendance closed — already late', status: 'late' });
     }
 
-    if (now >= presentStart && now <= presentEnd) {
+    if (currentMinutes <= presentEnd) {
       status = 'present';
-    } else if (now > presentEnd && now < cutoff) {
+    } else if (currentMinutes > presentEnd && currentMinutes < lateEnd) {
       status = 'late';
     } else {
       // before 09:00 -> treat as present by default
