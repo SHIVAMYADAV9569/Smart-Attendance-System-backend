@@ -12,6 +12,14 @@ const isDbConnected = () => {
   return mongoose.connection.readyState === 1;
 };
 
+// Helper function to convert UTC date to IST for display
+const convertToIST = (date) => {
+  if (!date) return null;
+  const utcDate = new Date(date);
+  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
+  return new Date(utcDate.getTime() + istOffset);
+};
+
 // Use mock database if MongoDB is not connected
 const getAttendanceModel = () => {
   return isDbConnected() ? Attendance : AttendanceMock;
@@ -74,12 +82,15 @@ router.get('/my-records', authenticateToken, async (req, res) => {
       user = memoryDb.users.find(u => u._id === req.user.userId);
     }
 
-    // Add user info to response
+    // Add user info to response with IST time conversions
     const enrichedRecords = records.map(record => ({
       ...record,
       userName: user?.name || 'Unknown',
       userEmail: user?.email || 'Unknown',
-      faceImage: user?.faceData || null  // Include the registered face photo
+      faceImage: user?.faceData || null,
+      checkInTimeIST: record.checkInTime ? convertToIST(record.checkInTime).toISOString() : null,
+      checkOutTimeIST: record.checkOutTime ? convertToIST(record.checkOutTime).toISOString() : null,
+      createdAtIST: convertToIST(record.createdAt).toISOString()
     }));
 
     res.json({
@@ -164,6 +175,10 @@ router.get('/all', authenticateToken, authorizeRole(['faculty', 'admin']), async
             enrollmentNumber: user.enrollmentNumber
           };
         }
+        // Add IST time conversions
+        record.checkInTimeIST = record.checkInTime ? convertToIST(record.checkInTime).toISOString() : null;
+        record.checkOutTimeIST = record.checkOutTime ? convertToIST(record.checkOutTime).toISOString() : null;
+        record.createdAtIST = convertToIST(record.createdAt).toISOString();
       }
     }
 
@@ -306,6 +321,9 @@ router.get('/today-records', authenticateToken, authorizeRole(['faculty', 'admin
             role: user.role
           };
         }
+        // Add IST time conversions
+        record.checkInTimeIST = record.checkInTime ? convertToIST(record.checkInTime).toISOString() : null;
+        record.checkOutTimeIST = record.checkOutTime ? convertToIST(record.checkOutTime).toISOString() : null;
       }
     }
 
@@ -380,7 +398,9 @@ router.get('/monthly-stats', authenticateToken, async (req, res) => {
         day: dateStr.split('-')[2],
         status: record ? record.status : (dayOfWeek === 0 || dayOfWeek === 6 ? 'weekend' : 'absent'),
         checkInTime: record ? record.checkInTime : null,
-        checkOutTime: record ? record.checkOutTime : null
+        checkInTimeIST: record ? convertToIST(record.checkInTime).toISOString() : null,
+        checkOutTime: record ? record.checkOutTime : null,
+        checkOutTimeIST: record ? convertToIST(record.checkOutTime).toISOString() : null
       });
     }
 
@@ -565,7 +585,8 @@ router.get('/students-status/today', authenticateToken, authorizeRole(['faculty'
         department: student.department,
         faceData: student.faceData,
         status: status,
-        checkInTime: attendanceRecord?.checkInTime || null
+        checkInTime: attendanceRecord?.checkInTime || null,
+        checkInTimeIST: attendanceRecord?.checkInTime ? convertToIST(attendanceRecord.checkInTime).toISOString() : null
       };
     });
 
