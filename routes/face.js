@@ -8,15 +8,6 @@ import mongoose from 'mongoose';
 
 const router = express.Router();
 
-// Helper function to get IST time (manual timezone conversion)
-const getISTTime = () => {
-  const now = new Date();
-  // IST is UTC+5:30
-  const istOffset = 5.5 * 60 * 60 * 1000; // 5.5 hours in milliseconds
-  const istTime = new Date(now.getTime() + istOffset + (now.getTimezoneOffset() * 60 * 1000));
-  return istTime;
-};
-
 // Check if MongoDB is connected
 const isDbConnected = () => mongoose.connection.readyState === 1;
 
@@ -94,11 +85,21 @@ router.post('/recognize', authenticateToken, async (req, res) => {
 
     const confidence = matchResult.confidence;
 
-    // Use IST time for attendance calculations
-    const now = getISTTime();
-    const today = new Date(now);
+    // Store in UTC, but calculate IST time for display and rules
+    const now = new Date();
+    
+    // Get IST time for time-based rules (display only)
+    const istTime = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+    const today = new Date(istTime);
     today.setHours(0, 0, 0, 0);
-    const timeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+    
+    // Format time in IST for display
+    const timeString = istTime.toLocaleTimeString("en-IN", { 
+      hour: '2-digit', 
+      minute: '2-digit',
+      hour12: false,
+      timeZone: "Asia/Kolkata"
+    });
 
     // Check if this user already marked attendance today
     let existingForUser = await AttendanceModel.findOne({ userId: req.user.userId, date: today });
@@ -116,8 +117,8 @@ router.post('/recognize', authenticateToken, async (req, res) => {
     // - >=14:00 => do not allow marking (show already late)
     let status = 'present';
     
-    // Convert current time to minutes for accurate comparison
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    // Convert current IST time to minutes for accurate comparison
+    const currentMinutes = istTime.getHours() * 60 + istTime.getMinutes();
     const presentEnd = 9 * 60 + 10; // 9:10 AM = 550 minutes
     const lateEnd = 14 * 60; // 2:00 PM = 840 minutes
     
@@ -143,10 +144,26 @@ router.post('/recognize', authenticateToken, async (req, res) => {
       status = 'present';
     }
 
-    const attendance = new AttendanceModel({ userId: req.user.userId, date: today, checkInTime: now, status, faceConfidence: confidence, ipAddress: getClientIp(req) });
+    // Store checkInTime in UTC (default)
+    const attendance = new AttendanceModel({ 
+      userId: req.user.userId, 
+      date: today, 
+      checkInTime: now, // UTC time
+      status, 
+      faceConfidence: confidence, 
+      ipAddress: getClientIp(req) 
+    });
     await attendance.save();
 
-    res.json({ message: 'Check-in successful', confidence, time: timeString, date: today.toISOString().split('T')[0], checkInTime: attendance.checkInTime, status: attendance.status });
+    // Return IST time for frontend display
+    res.json({ 
+      message: 'Check-in successful', 
+      confidence, 
+      time: timeString, // IST time
+      date: today.toISOString().split('T')[0], 
+      checkInTime: attendance.checkInTime, // UTC time
+      status: attendance.status 
+    });
   } catch (error) {
     console.error('❌ Face Recognition Error:', error);
     res.status(500).json({ message: 'Error during face recognition', error: String(error) });
