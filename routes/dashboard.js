@@ -179,8 +179,18 @@ router.get('/live-feed', authenticateToken, authorizeRole(['faculty', 'admin']),
       enrollment: record.userId?.enrollmentNumber || null,
       role: record.userId?.role || null,
       department: record.userId?.department || null,
-      checkInTime: record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString() : null,
-      checkOutTime: record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString() : null,
+      checkInTime: record.checkInTime ? new Date(record.checkInTime).toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata'
+      }) : null,
+      checkOutTime: record.checkOutTime ? new Date(record.checkOutTime).toLocaleTimeString('en-IN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'Asia/Kolkata'
+      }) : null,
       status: record.status,
       confidence: record.faceConfidence
     }));

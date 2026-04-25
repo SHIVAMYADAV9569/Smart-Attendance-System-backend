@@ -536,24 +536,26 @@ router.get('/students-status/today', authenticateToken, authorizeRole(['faculty'
 
     // Build student status list
     const studentStatuses = students.map(student => {
-      const attendanceRecord = attendanceRecords.find(r => r.userId.toString() === student._id.toString());
+      const attendanceRecord = attendanceRecords.find(r => r.userId?.toString() === student._id.toString());
       
       let status = 'absent'; // Default status
 
-      if (attendanceRecord && attendanceRecord.checkInTime) {
-        const checkInTime = new Date(attendanceRecord.checkInTime);
-        
-        if (checkInTime >= presentStart && checkInTime <= presentEnd) {
-          status = 'present';
-        } else if (checkInTime > presentEnd && checkInTime < cutoff) {
-          status = 'late';
-        } else if (checkInTime >= cutoff) {
-          status = 'absent';
-        }
-      } else {
-        // Check if it's already past 2 PM - mark as absent
-        if (now >= cutoff) {
-          status = 'absent';
+      // If attendance record exists and has a status set by faculty, use it
+      if (attendanceRecord) {
+        // Use the saved status from database (present/late/absent)
+        if (attendanceRecord.status && ['present', 'late', 'absent'].includes(attendanceRecord.status)) {
+          status = attendanceRecord.status;
+        } else if (attendanceRecord.checkInTime) {
+          // If no status but has checkInTime, calculate based on time
+          const checkInTime = new Date(attendanceRecord.checkInTime);
+          
+          if (checkInTime >= presentStart && checkInTime <= presentEnd) {
+            status = 'present';
+          } else if (checkInTime > presentEnd && checkInTime < cutoff) {
+            status = 'late';
+          } else if (checkInTime >= cutoff) {
+            status = 'absent';
+          }
         }
       }
 
