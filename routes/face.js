@@ -23,6 +23,64 @@ router.post('/register-face', authenticateToken, async (req, res) => {
     }
 
     const UserModel = getUserModel();
+    
+    // Check if this face is already registered by another user
+    if (isDbConnected()) {
+      const allUsers = await UserModel.find({ faceDescriptor: { $exists: true, $ne: null } });
+      
+      console.log('🔍 Face Uniqueness Check:', {
+        totalUsersWithFaces: allUsers.length,
+        currentUserId: req.user.userId
+      });
+      
+      for (const existingUser of allUsers) {
+        // Skip comparing with current user (allow re-registration)
+        if (existingUser._id.toString() === req.user.userId) {
+          continue;
+        }
+        
+        // Compare face descriptors using Euclidean distance
+        const matchResult = matchDescriptors(existingUser.faceDescriptor, faceDescriptor);
+        
+        console.log('📊 Comparison Result:', {
+          existingUser: existingUser.name,
+          distance: matchResult.distance.toFixed(4),
+          threshold: matchResult.threshold,
+          matched: matchResult.matched
+        });
+        
+        // Use the same threshold as face recognition (0.4) for consistency
+        // If matched=true, this face belongs to another user
+        if (matchResult.matched) {
+          console.log('⚠️ Face already registered:', {
+            existingUserId: existingUser._id,
+            existingUserName: existingUser.name,
+            distance: matchResult.distance.toFixed(4)
+          });
+          
+          return res.status(409).json({ 
+            message: 'Face already registered. This face is already associated with another account.',
+            code: 'FACE_ALREADY_REGISTERED'
+          });
+        }
+      }
+    } else {
+      // Memory DB fallback
+      for (const existingUser of memoryDb.users) {
+        if (!existingUser.faceDescriptor) continue;
+        if (existingUser._id === req.user.userId) continue;
+        
+        const matchResult = matchDescriptors(existingUser.faceDescriptor, faceDescriptor);
+        
+        if (matchResult.matched) {
+          return res.status(409).json({ 
+            message: 'Face already registered. This face is already associated with another account.',
+            code: 'FACE_ALREADY_REGISTERED'
+          });
+        }
+      }
+    }
+    
     let user = await UserModel.findById(req.user.userId);
     if (!user && !isDbConnected()) user = memoryDb.users.find(u => u._id === req.user.userId);
     if (!user) return res.status(404).json({ message: 'User not found' });
